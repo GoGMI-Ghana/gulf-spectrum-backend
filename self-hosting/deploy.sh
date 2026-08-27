@@ -93,7 +93,7 @@ cat <<'EOF'
 == Before starting the stack, edit docker/.env and set at minimum: ==
 
   SUPABASE_PUBLIC_URL   e.g. https://supabase.yourdomain.com  (or http://<vps-ip>:8000 for now)
-  API_EXTERNAL_URL      same value as above
+  API_EXTERNAL_URL      same host, with /auth/v1 appended — e.g. https://supabase.yourdomain.com/auth/v1
   SITE_URL              your frontend's URL, e.g. https://gulfspectrumjournal.com
   DASHBOARD_USERNAME    Studio login (dashboard_password was generated for you above)
 
@@ -105,6 +105,30 @@ again when you do.
 Press Enter once docker/.env is edited (or Ctrl+C to stop and edit later).
 EOF
 read -r _
+
+echo ""
+echo "== Checking for a port conflict on the Postgres pooler =="
+# If something outside Docker (an existing native Postgres install, most
+# commonly) is already bound to POSTGRES_PORT on this host, the supavisor
+# (pooler) container will crash-loop on startup rather than fail cleanly —
+# it manifests as a cryptic "hostname: Temporary failure in name
+# resolution" in its logs, nothing that points at a port conflict. Detect
+# it up front and remap just the host-side publish, leaving the existing
+# service on the box untouched.
+POOLER_HOST_PORT=$(grep '^POSTGRES_PORT=' .env | cut -d= -f2)
+if ss -ltn 2>/dev/null | grep -q ":${POOLER_HOST_PORT} " || netstat -ltn 2>/dev/null | grep -q ":${POOLER_HOST_PORT} "; then
+    ALT_PORT=$((POOLER_HOST_PORT + 1))
+    while ss -ltn 2>/dev/null | grep -q ":${ALT_PORT} "; do
+        ALT_PORT=$((ALT_PORT + 1))
+    done
+    echo "Port ${POOLER_HOST_PORT} is already in use by something else on this host (not this stack)."
+    echo "Remapping the pooler's published Postgres port to ${ALT_PORT} instead — internal"
+    echo "container-to-container traffic still uses ${POOLER_HOST_PORT} unchanged."
+    sed -i "s|^      - \${POSTGRES_PORT}:5432|      - ${ALT_PORT}:5432|" docker-compose.yml
+    echo "If anything external needs direct Postgres access (not through the REST API), use port ${ALT_PORT}."
+else
+    echo "Port ${POOLER_HOST_PORT} is free — no remap needed."
+fi
 
 echo ""
 echo "== Starting the stack =="

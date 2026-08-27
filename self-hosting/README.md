@@ -50,9 +50,12 @@ sh deploy.sh
    dashboard password, encryption keys — see the script comments for the
    full list). Nothing here hand-rolls JWT signing.
 4. Pause so you can edit `supabase-project/docker/.env` and set
-   `SUPABASE_PUBLIC_URL` / `API_EXTERNAL_URL` / `SITE_URL` / dashboard
-   credentials.
-5. `docker compose up -d`.
+   `SUPABASE_PUBLIC_URL` / `API_EXTERNAL_URL` (same host, with `/auth/v1`
+   appended) / `SITE_URL` / dashboard credentials.
+5. Check whether something outside Docker is already using the Postgres
+   port and remap the pooler's published port if so (see "Known gotcha"
+   below).
+6. `docker compose up -d`.
 
 Then load the journal's schema and seed data:
 
@@ -87,6 +90,31 @@ sh setup-https.sh supabase.gogmi.org.gh
   deploys are easiest to confirm against the running instance rather than
   guessed here.
 
+## Known gotcha: a pre-existing Postgres on the host
+
+If port 5432 (or whatever `POSTGRES_PORT` is set to) is already bound by
+something outside Docker — a natively-installed Postgres, for instance —
+the `supavisor` (connection pooler) container will crash-loop on startup.
+The failure is misleading: its logs just show
+
+```
+Setting RLIMIT_NOFILE to 100000
+hostname: Temporary failure in name resolution
+```
+
+repeated on every restart, which looks like a DNS problem but isn't one —
+it's the container failing to bind the host port it's told to publish.
+`deploy.sh` checks for this and remaps the pooler's *published* port
+automatically (internal container-to-container traffic is unaffected
+either way, since that goes over the Docker network to `db:5432`
+regardless of what's exposed to the host). If you ever hit this manually:
+`docker logs supabase-pooler`, then check `ss -ltnp | grep :5432` for
+what's already listening, and edit the `supavisor` service's `ports:`
+entry in `docker-compose.yml` to publish a free host port instead of
+touching whatever else is already using 5432 — don't stop or reconfigure
+an existing service you didn't set up without checking what it is and
+whether anything depends on it first.
+
 ## Updating later
 
 `deploy.sh` is safe to re-run — it skips steps that already succeeded
@@ -94,10 +122,16 @@ sh setup-https.sh supabase.gogmi.org.gh
 `git -C supabase-project pull` and `docker compose up -d` again from
 `supabase-project/docker`.
 
-## What's not verified here
+## Status
 
-Same caveat as the rest of this repo: this was put together carefully by
-reading Supabase's actual current `docker-compose.yml` and `.env.example`
-(not from memory — the API gateway is Envoy now, not Kong, which is a
-recent change), but it has not been run end-to-end against your VPS yet.
-Treat the first `sh deploy.sh` as the real test.
+Deployed and verified end-to-end on the GoGMI Hostinger VPS
+(`srv1275242.hstgr.cloud`, Ubuntu 24.04): all 11 services healthy, the
+`gulf-spectrum-backend` migration and seed applied cleanly, and
+`/rest/v1/topics` confirmed returning real seeded rows over the public
+gateway. The frontend's `.env.local` points at it.
+
+Not yet done: HTTPS (no domain pointed at the VPS yet — currently plain
+`http://<vps-ip>:8000`, fine for development but not for a live frontend
+requesting it from an HTTPS page), and the pre-existing native Postgres
+on the VPS (see "Known gotcha" above) hasn't been investigated — it
+predates this deployment and wasn't touched.
