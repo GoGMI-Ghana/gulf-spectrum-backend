@@ -24,10 +24,16 @@ transcribing something wrong.
   command if it's missing — Hostinger's Ubuntu templates don't ship it by
   default).
 - Optional but recommended for production: a domain or subdomain (e.g.
-  `supabase.gogmi.org.gh`) with its DNS A record pointed at the VPS's IP,
-  so `setup-https.sh` can get it a real TLS certificate. Without this the
-  stack is only reachable over plain HTTP, which a browser will refuse to
-  talk to from an HTTPS frontend (mixed content).
+  `api.gulfspectrumjournal.com`) with its DNS A record pointed at the
+  VPS's IP, so it can get a real TLS certificate. Without this the stack
+  is only reachable over plain HTTP, which a browser will refuse to talk
+  to from an HTTPS frontend (mixed content).
+- Check what's already listening on ports 80/443 before assuming either
+  HTTPS script applies (`ss -ltnp | grep -E ':80 |:443 '`). GoGMI's shared
+  VPS already runs nginx + certbot for its other projects
+  (`api.intranet.gogmi.org.gh`, `api.lms.gogmi.org.gh`) — on that box, use
+  `setup-https-nginx.sh`, not `setup-https.sh` (which installs Caddy and
+  would fight the existing nginx for those ports).
 
 ## Steps
 
@@ -66,10 +72,16 @@ sh apply-schema.sh
 That pipes `../supabase/migrations/*.sql` and `../supabase/seed.sql` into
 the running `db` container — no local `psql` needed.
 
-If you have a domain pointed at the VPS, turn on HTTPS:
+If you have a domain pointed at the VPS, turn on HTTPS. Check what's
+already on ports 80/443 first (see above) to pick the right script:
 
 ```bash
-sh setup-https.sh supabase.gogmi.org.gh
+# nginx already running on this VPS for other GoGMI projects — this is
+# the one that applies on GoGMI's shared VPS:
+sh setup-https-nginx.sh api.gulfspectrumjournal.com you@example.com
+
+# nothing on 80/443 yet (a bare VPS) — installs Caddy instead:
+sh setup-https.sh api.gulfspectrumjournal.com
 ```
 
 ## After the stack is running
@@ -115,6 +127,18 @@ touching whatever else is already using 5432 — don't stop or reconfigure
 an existing service you didn't set up without checking what it is and
 whether anything depends on it first.
 
+## Known gotcha: ports 80/443 already owned by another project's nginx
+
+GoGMI's Hostinger VPS isn't dedicated to this project — it already runs
+an intranet/LMS stack (native Postgres, nginx, certbot-managed certs for
+`api.intranet.gogmi.org.gh` and `api.lms.gogmi.org.gh`) from before this
+deployment. Nothing here touches that: `setup-https-nginx.sh` only adds a
+*new* nginx server block and requests a *new* certificate for our own
+domain, alongside the existing ones. If you're setting this up on a
+*different*, genuinely bare VPS, `setup-https.sh` (Caddy) is the simpler
+option — just confirm with `ss -ltnp` that nothing else owns those ports
+first.
+
 ## Updating later
 
 `deploy.sh` is safe to re-run — it skips steps that already succeeded
@@ -127,11 +151,11 @@ whether anything depends on it first.
 Deployed and verified end-to-end on the GoGMI Hostinger VPS
 (`srv1275242.hstgr.cloud`, Ubuntu 24.04): all 11 services healthy, the
 `gulf-spectrum-backend` migration and seed applied cleanly, and
-`/rest/v1/topics` confirmed returning real seeded rows over the public
-gateway. The frontend's `.env.local` points at it.
+`https://api.gulfspectrumjournal.com/rest/v1/topics` confirmed returning
+real seeded rows over the public gateway (certificate via certbot,
+auto-renewing). The frontend's `.env.local` points at the HTTPS URL.
 
-Not yet done: HTTPS (no domain pointed at the VPS yet — currently plain
-`http://<vps-ip>:8000`, fine for development but not for a live frontend
-requesting it from an HTTPS page), and the pre-existing native Postgres
-on the VPS (see "Known gotcha" above) hasn't been investigated — it
-predates this deployment and wasn't touched.
+Not yet done: the pre-existing native Postgres and nginx setup for
+GoGMI's other projects on this VPS (see the two "Known gotcha" sections
+above) haven't been investigated further than confirming they're
+unaffected — they predate this deployment and weren't touched.
