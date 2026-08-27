@@ -27,6 +27,22 @@ supabase/
   config.toml                        Supabase CLI project config.
 ```
 
+## Choosing where Postgres actually runs
+
+Two options, same schema and seed either way:
+
+- **Supabase Cloud** — a project's already been created there
+  ("GoGMI-Ghana's Project"). Follow "Connecting a real Supabase project"
+  below.
+- **Self-hosted on GoGMI's Hostinger VPS** — see
+  [`self-hosting/`](self-hosting/) for a `deploy.sh` that stands up the
+  official Supabase Docker stack on the VPS, plus a script to load this
+  repo's migration + seed data into it. This is the path currently being
+  set up.
+
+Either way, `supabase/migrations/` and `supabase/seed.sql` are what get
+applied — nothing about the schema changes based on where it's hosted.
+
 ## Prerequisites
 
 - Node.js (the Supabase CLI is installed as a local dev dependency, not

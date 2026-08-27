@@ -7,3 +7,7 @@ supabase/.branches/
 # Secrets — never commit real keys.
 .env
 .env.local
+
+# Self-hosting: deploy.sh clones the official Supabase repo here at deploy
+# time — never commit a copy of it (and its generated .env with real secrets).
+self-hosting/supabase-project/
