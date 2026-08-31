@@ -102,6 +102,32 @@ sh setup-https.sh api.gulfspectrumjournal.com
   deploys are easiest to confirm against the running instance rather than
   guessed here.
 
+## Known gotcha: `SITE_URL` has to match wherever the frontend actually is
+
+`docker/.env`'s `SITE_URL` (and `ADDITIONAL_REDIRECT_URLS`, a comma-separated
+allow-list) control which `redirect_to` values GoTrue will actually honor
+after a sign-in — OAuth (Google, etc.) included. Anything not in that list
+gets silently swapped for `SITE_URL` itself, with no error surfaced to the
+frontend. `deploy.sh`'s .env-editing pause mentions this, but it's easy to
+leave at the `.env.example` default (`http://localhost:3000`) since nothing
+breaks loudly until someone actually tries an OAuth sign-in — the failure
+mode is a mysterious redirect to `localhost:3000` from a production site,
+not an obvious error. Hit this exact thing once already: `SITE_URL` never
+got updated off the default when the stack was first stood up, and Google
+sign-in silently bounced everyone's browser to `localhost:3000` until caught.
+
+Update both whenever the frontend's deployed URL changes (a new Vercel
+preview, a custom domain replacing the current one, etc.):
+
+```bash
+# in supabase-project/docker/
+sed -i \
+  -e 's|^SITE_URL=.*|SITE_URL=https://your-real-frontend-url|' \
+  -e 's|^ADDITIONAL_REDIRECT_URLS=.*|ADDITIONAL_REDIRECT_URLS=http://localhost:3000/auth/callback|' \
+  .env
+docker compose up -d auth
+```
+
 ## Known gotcha: a pre-existing Postgres on the host
 
 If port 5432 (or whatever `POSTGRES_PORT` is set to) is already bound by
