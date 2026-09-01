@@ -1,57 +1,61 @@
 # Gulf Spectrum Backend
 
-Supabase backend for [Gulf Spectrum Journal](https://github.com/GoGMI-Ghana/Gulf-spectrum-journal) — the Postgres schema, seed data, and edge functions. Not connected to a live Supabase project yet; this repo is the schema and the seed, ready to apply once one exists.
+Supabase backend for [Gulf Spectrum Journal](https://github.com/GoGMI-Ghana/Gulf-spectrum-journal) — the Postgres schema and seed data. Live: self-hosted on GoGMI's Hostinger VPS (see [`self-hosting/`](self-hosting/)), applied and verified against the real running instance, not just written and hoped for.
 
 ## What's here
 
 ```
 supabase/
   migrations/
-    20260826000000_init_schema.sql   The full schema: topics, authors, issues,
+    20260826000000_init_schema.sql   Core schema: topics, authors, issues,
                                       articles, article_authors, bookmarks,
                                       article_events (+ article_stats view),
-                                      donations, memberships, profiles, and
-                                      the RLS policies governing all of it.
+                                      donations, profiles, and the RLS
+                                      policies governing all of it.
+    ...later migrations             article_daily_stats view, notifications
+                                      (+ publish-fanout triggers), direct
+                                      messages (conversations/messages,
+                                      member directory, realtime), account
+                                      deletion support, and dropping the
+                                      memberships table (GoGMI
+                                      membership/dues were removed from the
+                                      site — donations on individual
+                                      articles are the one payment flow).
   seed.sql                           Real INSERT statements for Issue No. 1's
-                                      placeholder content — the same data the
-                                      frontend currently ships as static
-                                      arrays in lib/content.ts. Keeps the two
-                                      in sync until the frontend is switched
-                                      over to querying this database.
-  functions/
-    paystack-webhook/                Verifies a Paystack webhook signature
-                                      and marks a donation/membership row
-                                      'completed'. Real, correct code — just
-                                      not deployed or connected to a real
-                                      Paystack account yet.
+                                      content — applied to the live database,
+                                      not just shipped as frontend fallback
+                                      data.
   config.toml                        Supabase CLI project config.
 ```
 
+There's no `supabase/functions/` here anymore — the Paystack webhook lives
+in the **frontend** repo instead (`app/api/paystack-webhook`), not as a
+Supabase Edge Function. Reason: the self-hosted stack's function gateway
+requires an `apikey` header on every request (confirmed directly against
+the live instance), and Paystack's webhook configuration has no way to
+send custom headers — it's just a URL. A Next.js Route Handler on Vercel
+has no such gate.
+
 ## Choosing where Postgres actually runs
 
-Two options, same schema and seed either way:
+Two options, same schema and seed either way — see
+[`self-hosting/`](self-hosting/) for the one actually in use:
 
-- **Supabase Cloud** — a project's already been created there
-  ("GoGMI-Ghana's Project"). Follow "Connecting a real Supabase project"
-  below.
-- **Self-hosted on GoGMI's Hostinger VPS** — see
-  [`self-hosting/`](self-hosting/) for a `deploy.sh` that stands up the
-  official Supabase Docker stack on the VPS, plus a script to load this
-  repo's migration + seed data into it. This is the path currently being
-  set up.
-
-Either way, `supabase/migrations/` and `supabase/seed.sql` are what get
-applied — nothing about the schema changes based on where it's hosted.
+- **Self-hosted on GoGMI's Hostinger VPS** — the live path. `deploy.sh`
+  stands up the official Supabase Docker stack; `apply-schema.sh` loads
+  this repo's migrations + seed into it.
+- **Supabase Cloud** — a project exists there too ("GoGMI-Ghana's
+  Project") but isn't what's actually deployed. Follow "Connecting a real
+  Supabase project" below if that ever changes.
 
 ## Prerequisites
 
 - Node.js (the Supabase CLI is installed as a local dev dependency, not
   globally — everything below runs through `npm run`).
-- **Docker Desktop**, if you want to run this against a local Postgres
-  instance (`supabase start`). Not required to deploy to a real hosted
-  project — `supabase db push` talks to the remote database directly.
-- A [Supabase](https://supabase.com) account, once you're ready to create
-  a real project (free tier is enough to start).
+- **Docker Desktop**, only if you want to run this against a local
+  Postgres instance (`supabase start`) for local development. Not needed
+  to apply migrations to the self-hosted VPS or a real hosted project —
+  both of those talk to a remote database directly.
 
 ## Local development (needs Docker)
 
@@ -71,7 +75,31 @@ npm run db:reset   # re-apply migrations + seed against the local DB
                     # (useful after editing a migration)
 ```
 
-## Connecting a real Supabase project
+## Applying a new migration to the self-hosted VPS
+
+This is how every migration in this repo has actually been applied and
+verified — not `supabase db push` (that targets Supabase Cloud
+specifically):
+
+```bash
+scp supabase/migrations/<new-file>.sql root@<vps-ip>:~/gulf-spectrum-backend/supabase/migrations/
+ssh root@<vps-ip> '
+  cd ~/gulf-spectrum-backend/self-hosting/supabase-project/docker
+  docker compose exec -T db psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f - \
+    < ~/gulf-spectrum-backend/supabase/migrations/<new-file>.sql
+'
+```
+
+`-v ON_ERROR_STOP=1` matters: without it, psql keeps going after a failed
+statement instead of stopping, which can leave a migration half-applied.
+If a migration fails partway through, the objects it did create before
+failing need to be dropped by hand before re-running the corrected file —
+`CREATE TABLE`/`CREATE POLICY`/etc. aren't idempotent, so re-running as-is
+errors on "already exists" instead of resuming.
+
+## Connecting a real Supabase Cloud project
+
+Only relevant if you move off self-hosting:
 
 1. Create a project at [supabase.com](https://supabase.com/dashboard).
 2. Authenticate the CLI: `npx supabase login`
@@ -79,61 +107,34 @@ npm run db:reset   # re-apply migrations + seed against the local DB
    ```bash
    npx supabase link --project-ref <your-project-ref>
    ```
-   (The project ref is in the project's Settings -> General.)
-4. Push the schema:
-   ```bash
-   npm run db:push
-   ```
+4. Push the schema: `npm run db:push`
 5. Seed it — the CLI doesn't run `seed.sql` against a remote project
-   automatically (that only happens on local `db reset`), so run it
-   directly via `psql` or the Supabase Studio SQL editor:
+   automatically, so run it directly:
    ```bash
    psql "$(npx supabase status -o env | grep DB_URL | cut -d= -f2)" -f supabase/seed.sql
    ```
-   or paste `supabase/seed.sql`'s contents into the SQL Editor in Studio.
 6. Copy the project's URL and anon key (Settings -> API) into the
-   **frontend** repo's `.env.local` (see its README) — that's the wiring
-   that switches the site from placeholder data to this database.
+   **frontend** repo's `.env.local`.
 
 ## Editing the schema
 
-Don't hand-edit `20260826000000_init_schema.sql` after it's been applied
-anywhere real. Instead, make a new migration:
+Don't hand-edit `20260826000000_init_schema.sql` (or any migration)
+after it's been applied anywhere real. Instead, make a new migration:
 
 ```bash
 npx supabase migration new <description>
 # edit the new file in supabase/migrations/
-npm run db:reset    # re-applies everything locally to check it
-npm run db:push      # apply to the linked remote project
+npm run db:reset    # re-applies everything locally to check it, if Docker's available
 ```
 
-## Paystack webhook
+Then apply it to the VPS the same way as above.
 
-`supabase/functions/paystack-webhook` verifies the Paystack signature and
-marks the corresponding `donations` or `memberships` row `completed`. To
-go live:
+## Paystack
 
-1. Create a Paystack account, get the secret key (Settings -> API Keys
-   & Webhooks).
-2. `npx supabase secrets set PAYSTACK_SECRET_KEY=sk_...`
-3. `npm run functions:deploy`
-4. In the Paystack dashboard, set the webhook URL to
-   `https://<project-ref>.supabase.co/functions/v1/paystack-webhook`.
-5. The frontend's checkout call needs to pass
-   `metadata: { type: 'donation' | 'membership', record_id: '<uuid>' }`
-   when initializing the Paystack transaction, so the webhook knows which
-   row to update. That frontend integration (in `SupportBox.tsx` /
-   `JoinForm.tsx`) isn't built yet — right now those forms show a "no
-   payment was processed" message instead of starting a real checkout.
-
-## A note on what's verified here and what isn't
-
-This schema was written carefully and reviewed for RLS/privilege issues
-(see the migration's comments — e.g. the `is_editor()` helper and the
-explicit `revoke update (role, ...)` guarding against a user promoting
-themselves to admin), but it has **not been executed against a real
-Postgres**. Docker wasn't available in the environment this was built in,
-so `supabase start` / `db reset` / `db lint` couldn't be run here. Treat
-the first `npm run db:start` (or `db:push` to a real project) as the real
-test — if something doesn't apply cleanly, that's expected to surface
-there, not a sign anything was skipped carelessly.
+Donations (the one payment flow — GoGMI membership/dues were removed)
+use Paystack's hosted checkout. Both the checkout-initiation call and the
+webhook that confirms payment live in the **frontend** repo now (see the
+note under "What's here" above for why) — `app/api/donations/initiate`
+and `app/api/paystack-webhook`. This repo just owns the `donations` table
+and its RLS (`for insert with check (true)` — anyone can start a pending
+donation; only editors can read the list back).
