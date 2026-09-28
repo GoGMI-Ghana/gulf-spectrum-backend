@@ -2,6 +2,8 @@
 
 Supabase backend for [Gulf Spectrum Journal](https://github.com/GoGMI-Ghana/Gulf-spectrum-journal) — the Postgres schema and seed data. Live: self-hosted on GoGMI's Hostinger VPS (see [`self-hosting/`](self-hosting/)), applied and verified against the real running instance, not just written and hoped for.
 
+> **New to the project?** The full handover document (architecture, operations, accounts, open items) is [HANDOVER.md in the frontend repo](https://github.com/GoGMI-Ghana/Gulf-spectrum-journal/blob/main/HANDOVER.md).
+
 ## What's here
 
 ```
