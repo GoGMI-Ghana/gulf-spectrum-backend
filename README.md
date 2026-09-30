@@ -23,10 +23,13 @@ supabase/
                                       membership/dues were removed from the
                                       site — donations on individual
                                       articles are the one payment flow).
-  seed.sql                           Real INSERT statements for Issue No. 1's
-                                      content — applied to the live database,
-                                      not just shipped as frontend fallback
-                                      data.
+  seed.sql                           The journal's topics (its scope areas).
+                                      Issues, articles and authors are
+                                      entered through the admin panel.
+  cleanup/remove-placeholder-content.sql
+                                      One-off: deletes the placeholder
+                                      Issue No. 1 that earlier versions of
+                                      seed.sql loaded.
   config.toml                        Supabase CLI project config.
 ```
 
