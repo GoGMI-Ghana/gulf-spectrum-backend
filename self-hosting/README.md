@@ -165,6 +165,66 @@ domain, alongside the existing ones. If you're setting this up on a
 option — just confirm with `ss -ltnp` that nothing else owns those ports
 first.
 
+## Backups
+
+Everything the journal has — accounts, articles, issues, donations,
+messages, uploaded images — lives on this one server. Three scripts here
+look after it:
+
+| Script | What it does |
+|---|---|
+| `setup-backups.sh` | One-time setup: schedules the nightly backup (02:15 UTC) and takes a first one. |
+| `backup.sh` | Takes one backup. Run by the schedule; also run it by hand before a risky change. |
+| `verify-backup.sh` | Restores the newest backup into a scratch database and compares row counts with live. |
+
+Set up (once, as root):
+
+```bash
+sh setup-backups.sh
+sh verify-backup.sh
+```
+
+Each backup is one archive in `/var/backups/gulf-spectrum/` holding the
+database dump (`db.dump`), the uploaded files (`storage.tar.gz`) and the
+stack's `.env` (`env.backup`). The newest 14 are kept. Each run adds a
+line to `/var/log/gulf-spectrum-backup.log` — a run that ends with
+`BACKUP FAILED` needs looking at.
+
+**These archives are on the same server as the data.** They protect against
+a bad migration or an accidental deletion, not against losing the server.
+For that, also copy them off the server — `backup.sh`'s header explains the
+`RCLONE_REMOTE` / `PASSPHRASE_FILE` settings (the off-server copy is
+encrypted, because the archive contains the stack's secrets) — and/or turn
+on Hostinger's own VPS backups/snapshots in hPanel.
+
+### Restoring
+
+Check first with `sh verify-backup.sh /var/backups/gulf-spectrum/<archive>`
+that the archive is good. Then, depending on what was lost:
+
+**Some data was deleted or damaged, the server is fine.** Restore just what
+is needed from the scratch copy rather than replacing the live database:
+unpack the archive, load `db.dump` into a separate database
+(`create database recovered;` then `pg_restore -U supabase_admin -d recovered --no-owner < db.dump`,
+both inside the `db` container), and copy the rows back with SQL.
+
+**The whole server was lost.** On the new server:
+
+1. Run `deploy.sh`, but before `docker compose up -d` replace the generated
+   `supabase-project/docker/.env` with `env.backup` from the archive — the
+   restored data only works with the same JWT secret and keys.
+2. Start the stack, then stop everything except the database:
+   `docker compose stop` and `docker compose start db`.
+3. Restore the dump over the fresh database:
+   `docker compose exec -T db pg_restore -U supabase_admin -d postgres --clean --if-exists --no-owner < db.dump`
+   (messages about a few built-in extensions already existing are expected).
+4. Unpack `storage.tar.gz` into `supabase-project/docker/volumes/`.
+5. `docker compose up -d`, then point DNS at the new server and re-run the
+   HTTPS setup script.
+
+The full-server restore has not been rehearsed end to end. Rehearse it on a
+spare VPS before relying on it.
+
 ## Updating later
 
 `deploy.sh` is safe to re-run — it skips steps that already succeeded
